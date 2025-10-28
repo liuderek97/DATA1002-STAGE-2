@@ -11,6 +11,7 @@ countries = ["Argentina","Australia","Brazil","Canada","China","France","Germany
              "Saudi Arabia","South Africa","United Kingdom","United States"]
 years = list(range(2000, 2016))
 
+
 df_co2 = df_co2[["Entity", "Year", "Annual CO₂ emissions (tonnes )"]].rename(
     columns={"Entity": "Country", "Annual CO₂ emissions (tonnes )": "CO2 Use"}
 )
@@ -21,24 +22,24 @@ df_gdp = df_gdp[["Country Name", "Time", "Value"]].rename(
 )
 df_gdp = df_gdp[df_gdp["Country"].isin(countries) & df_gdp["Year"].isin(years)]
 
-
 df_le = df_le[["Country", "Year", "Life expectancy "]].rename(
     columns={"Life expectancy ": "Life Expectancy"}
 )
 df_le = df_le[df_le["Country"].isin(countries) & df_le["Year"].isin(years)]
 
 
-dataset_A = df_gdp[["Country", "Year", "GDP per capita USD"]]
-dataset_A.to_csv("dataset_A_gdp_only.csv", index=False)
-
-dataset_B = pd.merge(df_gdp, df_co2, on=["Country", "Year"], how="inner")[
-    ["Country", "Year", "GDP per capita USD", "CO2 Use"]
+dataset_A = pd.merge(df_gdp, df_le, on=["Country", "Year"], how="inner")[
+    ["Country", "Year", "GDP per capita USD", "Life Expectancy"]
 ]
-dataset_B.to_csv("dataset_B_gdp_co2.csv", index=False)
+dataset_A.to_csv("dataset_A_gdp_life.csv", index=False)
 
 
-dataset_C = pd.merge(dataset_B, df_le, on=["Country", "Year"], how="inner")[
+dataset_B = pd.merge(df_gdp, df_co2, on=["Country", "Year"], how="inner")
+dataset_B = pd.merge(dataset_B, df_le, on=["Country", "Year"], how="inner")[
     ["Country", "Year", "GDP per capita USD", "CO2 Use", "Life Expectancy"]
 ]
+dataset_B.to_csv("dataset_B_gdp_co2_life.csv", index=False)
+
+dataset_C = dataset_B.copy()
 dataset_C.to_csv("dataset_C_gdp_co2_year_life.csv", index=False)
 
