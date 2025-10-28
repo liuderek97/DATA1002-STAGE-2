@@ -1,81 +1,75 @@
-# ==========================================
-# Simple country-grouped train/val/test split
-# Models: Linear, RandomForest, KNN
-# ==========================================
-
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import GroupShuffleSplit
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score
+import matplotlib.pyplot as plt
 
-# ----- Load data -----
-life = pd.read_csv("Life Expectancy Data.csv")
-co2  = pd.read_csv("co2_emission.csv")
-gdp  = pd.read_csv("f5a9ad86-f7cb-42ba-868e-b444c1d52fa4_Data.csv")
 
-# Clean and select
-life = life[["Country", "Year", "Life expectancy "]].rename(columns={"Life expectancy ": "Life Expectancy"})
-gdp = gdp.rename(columns={"Country Name":"Country","Time":"Year","Value":"GDP per capita USD"})
-co2 = co2.rename(columns={"Entity":"Country","Annual CO₂ emissions (tonnes per capita)":"CO2 per capita"})
+dfA = pd.read_csv("dataset_A_gdp_life.csv")
+dfB = pd.read_csv("dataset_B_gdp_co2_life.csv")
+dfC = pd.read_csv("dataset_C_gdp_co2_year_life.csv")
 
-# Merge
-df = life.merge(gdp, on=["Country","Year"], how="inner").merge(co2, on=["Country","Year"], how="inner")
-df = df.dropna().copy()
-df["log_GDP_per_capita"] = np.log(df["GDP per capita USD"])
+datasets = {"A": dfA, "B": dfB, "C": dfC}
 
-# ----- Grouped split by Country -----
-seed = 42
-groups = df["Country"]
+def train_and_plot(tag, df):
+    # Clean
+    df = df.dropna(subset=["Life Expectancy", "GDP per capita USD", "Year"])
+    if "CO2 Use" in df.columns:
+        df = df.dropna(subset=["CO2 Use"])
+    
+    # Transform
+    df["log_GDP_per_capita"] = np.log(df["GDP per capita USD"])
+    features = ["log_GDP_per_capita", "Year"]
+    if "CO2 Use" in df.columns:
+        features.append("CO2 Use")
 
-# 75% train, 25% temp
-gss1 = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=seed)
-train_idx, temp_idx = next(gss1.split(df, groups=groups))
-train, temp = df.iloc[train_idx], df.iloc[temp_idx]
+    X = df[features]
+    y = df["Life Expectancy"]
 
-# 15% val, 10% test from 25% temp
-gss2 = GroupShuffleSplit(n_splits=1, test_size=0.4, random_state=seed)
-val_idx, test_idx = next(gss2.split(temp, groups=temp["Country"]))
-val, test = temp.iloc[val_idx], temp.iloc[test_idx]
+    # Split 75/15/10
+    X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.25, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.4, random_state=42)
+    X_trainval, y_trainval = pd.concat([X_train, X_val]), pd.concat([y_train, y_val])
 
-# ----- Prepare data -----
-X_train = train[["log_GDP_per_capita","CO2 per capita","Year"]]
-y_train = train["Life Expectancy"]
-X_val   = val[["log_GDP_per_capita","CO2 per capita","Year"]]
-y_val   = val["Life Expectancy"]
-X_test  = test[["log_GDP_per_capita","CO2 per capita","Year"]]
-y_test  = test["Life Expectancy"]
+    # Models
+    models = {
+        "Linear": Pipeline([("scale", StandardScaler()), ("model", LinearRegression())]),
+        "KNN": Pipeline([("scale", StandardScaler()), ("model", KNeighborsRegressor(n_neighbors=5))]),
+        "RF": RandomForestRegressor(n_estimators=200, random_state=42)
+    }
 
-# ----- Define models -----
-models = {
-    "Linear": Pipeline([("scale", StandardScaler()), ("model", LinearRegression())]),
-    "KNN": Pipeline([("scale", StandardScaler()), ("model", KNeighborsRegressor(n_neighbors=5))]),
-    "RandomForest": RandomForestRegressor(n_estimators=200, random_state=seed)
-}
+    results = {}
+    for name, model in models.items():
+        model.fit(X_trainval, y_trainval)
+        y_pred = model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        r2 = r2_score(y_test, y_pred)
+        results[name] = {"MSE": mse, "R2": r2}
 
-# ----- Train and validate -----
-val_scores = {}
-for name, model in models.items():
-    model.fit(X_train, y_train)
-    pred_val = model.predict(X_val)
-    mse = mean_squared_error(y_val, pred_val)
-    r2  = r2_score(y_val, pred_val)
-    val_scores[name] = mse
-    print(f"{name:12s} -> Val MSE: {mse:.3f}, Val R²: {r2:.3f}")
+        # Save plot as PNG
+        plt.figure(figsize=(5,5))
+        plt.scatter(y_test, y_pred, alpha=0.7)
+        plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], "r--")
+        plt.title(f"{tag} - {name}\nLife Expectancy\nR²={r2:.2f}, MSE={mse:.2f}")
+        plt.xlabel("Actual Life Expectancy")
+        plt.ylabel("Predicted Life Expectancy")
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(f"{tag}_{name.lower()}_life_expectancy.png", dpi=300, bbox_inches="tight")
+        plt.close()
 
-best = min(val_scores, key=val_scores.get)
-print(f"\nBest model (validation): {best}")
+    # Print summary
+    best_model = min(results, key=lambda x: results[x]["MSE"])
+    print(f"\nDataset {tag} Results:")
+    for name, m in results.items():
+        print(f"  {name:<10} | MSE={m['MSE']:.3f} | R²={m['R2']:.3f}")
+    print(f"  → Best model: {best_model}\n")
 
-# ----- Final test -----
-final_model = models[best]
-X_trainval = pd.concat([X_train, X_val])
-y_trainval = pd.concat([y_train, y_val])
-final_model.fit(X_trainval, y_trainval)
-pred_test = final_model.predict(X_test)
-print(f"\nTEST RESULTS ({best})")
-print("MSE:", mean_squared_error(y_test, pred_test))
-print("R² :", r2_score(y_test, pred_test))
+# ---- Run for all datasets ----
+for tag, df in datasets.items():
+    train_and_plot(tag, df)
